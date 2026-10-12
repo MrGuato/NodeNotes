@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: NodeNotes
+## Notes: Remembers where you gathered herbs and ore, what each node gave you and when, and shows it on the world map and minimap with a note you can write.
+## Author: MrGuato
+## Version: 0.2.0
+## SavedVariables: NodeNotesDB
+
+Core.lua
+Note.lua
+Map.lua
+Minimap.lua
