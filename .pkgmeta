@@ -1,0 +1,12 @@
+# CurseForge packager settings. The packager builds a zip from each tagged
+# commit it sees on GitHub. Files and folders starting with a dot are left out
+# on their own.
+package-as: NodeNotes
+
+manual-changelog:
+    filename: CHANGELOG.md
+    markup-type: markdown
+
+ignore:
+    - tests
+    - docs
