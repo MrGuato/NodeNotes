@@ -1,6 +1,6 @@
 -- The small window that opens when you click a node pin.
 
-local ADDON, ns = ...
+local _, ns = ...
 
 local Note = {}
 ns.Note = Note

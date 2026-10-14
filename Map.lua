@@ -4,7 +4,7 @@
 -- hand. The addon only listens to the map through secure hooks, so it does not
 -- replace or interfere with any of the map's own code.
 
-local ADDON, ns = ...
+local _, ns = ...
 
 local Map = {}
 ns.Map = Map

@@ -102,7 +102,7 @@ fire("ADDON_LOADED", "Other"); assert(NodeNotesDB == nil)
 fire("ADDON_LOADED", "NodeNotes"); fire("PLAYER_LOGIN")
 local db = NodeNotesDB
 assert(db.sessions == 1 and db.settings.pins == true and db.settings.chests == false)
-assert(db.settings.minimap == true and db.settings.debug == false)
+assert(db.settings.minimap == true and db.settings.fishing == true and db.settings.debug == false)
 local slash = assert(SlashCmdList.NODENOTES); assert(SLASH_NODENOTES2 == "/nn")
 slash("debug on")
 slash(""); slash("list"); slash("note hi")   -- nothing recorded yet, must not error
@@ -150,7 +150,9 @@ openLoot({ { name = "Linen Cloth", qty = 2, guid = "Creature-0-3299-0-36-1234-00
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 133); openLoot({ { name = "Wool Cloth", qty = 1 } })    -- non-gather cast
 openLoot({ { name = "Silk Cloth", qty = 1, guid = "GameObject-0-3299-0-36-99-00005E1234" } })           -- chest, chests off
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); advance(30); openLoot({ { name = "Stale", qty = 1 } }) -- cast too old
+slash("fishing off")
 fishing = true; fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); openLoot({ { name = "Fish", qty = 1 } }); fishing = false
+slash("fishing on")
 fire("UNIT_SPELLCAST_SUCCEEDED", "party1", "c", 2366); openLoot({ { name = "NotMine", qty = 1 } })      -- someone else
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", SECRET); openLoot({ { name = "Hidden", qty = 1 } })    -- secret spell id
 pos.x = nil; fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); openLoot({ { name = "Indoors", qty = 1 } }); pos.x = 0.40 -- no map position
@@ -162,6 +164,33 @@ slash("chests on"); pos.x, pos.y = 0.10, 0.10
 openLoot({ { name = "Silk Cloth", qty = 1, guid = "GameObject-0-3299-0-36-99-00005E1234" } })
 assert(#list == before + 1 and list[#list].kind == "other" and list[#list].name == "Silk Cloth")
 slash("chests off")
+
+-- 7b. fishing: the client flags the loot, no cast needed. Casts from one stretch of
+-- shore merge into one spot, and a session is one visit.
+pos.x, pos.y = 0.70, 0.20
+fishing = true
+openLoot({ { name = "Raw Brilliant Smallfish", qty = 1, guid = "GameObject-0-3299-0-36-35591-00005E1234" } })
+local spot = list[#list]
+assert(spot.kind == "fish" and spot.name == "Fishing Spot" and spot.count == 1 and spot.obj == nil, "fishing spot not recorded")
+assert(out[#out]:find("new fishing spot in Stranglethorn Vale", 1, true), out[#out])
+advance(30); pos.x = 0.705   -- 20 yards along the shore: too far for a herb, same fishing spot
+openLoot({ { name = "Raw Brilliant Smallfish", qty = 1 }, { name = "Raw Longjaw Mud Snapper", qty = 1 } })
+assert(list[#list] == spot and spot.count == 1 and spot.loot[1].qty == 2 and #spot.loot == 2, "second cast must merge")
+advance(700)
+openLoot({ { name = "Raw Brilliant Smallfish", qty = 1 } })
+assert(spot.count == 2 and #spot.loot == 1 and spot.totals["Raw Brilliant Smallfish"] == 3, "later session is a new visit")
+assert(ns.Describe(spot, 224)[2]:find("^Fished 2 times"), ns.Describe(spot, 224)[2])
+-- a stale herb cast does not turn a catch into a herb
+fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); advance(1)
+openLoot({ { name = "Raw Brilliant Smallfish", qty = 1 } })
+assert(list[#list] == spot and spot.totals["Raw Brilliant Smallfish"] == 4)
+slash("fishing off"); openLoot({ { name = "Raw Brilliant Smallfish", qty = 1 } }); assert(spot.totals["Raw Brilliant Smallfish"] == 4)
+slash("fishing on")
+fishing = false
+-- a herb at the same place is its own node
+gather(2366, "Silverleaf", { { name = "Silverleaf", qty = 1, guid = HERB_GUID } })
+assert(list[#list].kind == "herb" and list[#list] ~= spot)
+pos.x, pos.y = 0.40, 0.60
 
 -- 8. notes: from chat, and through the window (saved on close)
 slash("note   3x stranglekelp, behind the wreck  ")

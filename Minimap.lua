@@ -5,7 +5,7 @@
 -- are hidden. Pins show a tooltip but let clicks pass through, so pinging the
 -- minimap still works on top of them.
 
-local ADDON, ns = ...
+local _, ns = ...
 
 local Mini = {}
 ns.Mini = Mini

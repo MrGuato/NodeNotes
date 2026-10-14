@@ -1,23 +1,26 @@
 -- NodeNotes: a personal record of the gathering nodes you have used.
 --
 -- It records a node when you finish a herb or mining cast and the loot
--- window opens: where you stood, what the node gave you, and when. Nothing is
--- shared with other players and nothing is automated. Every record comes from
--- something you did yourself.
+-- window opens, or when you land a catch while fishing: where you stood, what
+-- it gave you, and when. Nothing is shared with other players and nothing is
+-- automated. Every record comes from something you did yourself.
 
 local ADDON, ns = ...
 
 -- Two gathers of the same kind closer than this (in map coordinates, where a
--- whole zone is 1.0 wide) count as the same node. About 10 to 15 yards.
-local MERGE_RADIUS = 0.003
+-- whole zone is 1.0 wide) count as the same node. Herbs and veins stand still,
+-- so about 10 to 15 yards. A fishing spot is wherever you stood on the shore,
+-- so it gets more room.
+local MERGE_RADIUS = { herb = 0.003, ore = 0.003, other = 0.003, fish = 0.008 }
 -- Seconds allowed between a gather cast finishing and its loot showing up.
 local GATHER_WINDOW = 6
--- A mining vein takes several hits. Hits this close together are one visit.
-local VISIT_WINDOW = 90
+-- A mining vein takes several hits and a fishing session takes many casts.
+-- Gathers this close together in time count as one visit.
+local VISIT_WINDOW = { herb = 90, ore = 90, other = 90, fish = 600 }
 local SENT_WINDOW = 15
 local DEBUG_MAX = 300
 
-local DEFAULTS = { pins = true, minimap = true, chests = false, debug = false }
+local DEFAULTS = { pins = true, minimap = true, fishing = true, chests = false, debug = false }
 
 local db
 local pending      -- the last gather cast that finished, waiting for its loot
@@ -138,7 +141,8 @@ end
 function ns.Describe(node, mapID)
     local lines = {}
     lines[#lines + 1] = ("%s  %.1f, %.1f"):format(ns.MapName(mapID), node.x * 100, node.y * 100)
-    lines[#lines + 1] = ("Gathered %d time%s, last %s"):format(node.count, node.count == 1 and "" or "s", ns.Ago(node.last))
+    local verb = node.kind == "fish" and "Fished" or "Gathered"
+    lines[#lines + 1] = ("%s %d time%s, last %s"):format(verb, node.count, node.count == 1 and "" or "s", ns.Ago(node.last))
     if node.loot and #node.loot > 0 then
         lines[#lines + 1] = "Last yield: " .. ns.LootText(node.loot)
     end
@@ -178,13 +182,14 @@ function ns.RecordGather(mapID, x, y, kind, name, objectID, items, now)
         db.nodes[mapID] = list
     end
 
+    local radius = MERGE_RADIUS[kind] or MERGE_RADIUS.other
     local node, best
     for i = 1, #list do
         local n = list[i]
         if n.kind == kind then
             local dx, dy = n.x - x, n.y - y
             local d = dx * dx + dy * dy
-            if d <= MERGE_RADIUS * MERGE_RADIUS and (not best or d < best) then
+            if d <= radius * radius and (not best or d < best) then
                 node, best = n, d
             end
         end
@@ -197,7 +202,8 @@ function ns.RecordGather(mapID, x, y, kind, name, objectID, items, now)
         isNew = true
     end
 
-    local sameVisit = node.last and (now - node.last) < VISIT_WINDOW
+    local window = VISIT_WINDOW[kind] or VISIT_WINDOW.other
+    local sameVisit = node.last and (now - node.last) < window
     if not sameVisit then
         node.count = node.count + 1
         node.loot = {}
@@ -335,12 +341,24 @@ local function handleLoot()
     log("loot: %d item(s) [%s] object=%s gather=%s fishing=%s", #items, ns.LootText(items),
         tostring(objectID), gather and gather.kind or "none", tostring(fishing))
 
-    if fishing or #items == 0 then
+    if #items == 0 then
         return
     end
-    local kind = gather and gather.kind
-    if not kind and fromObject and db.settings.chests then
-        kind = "other"
+
+    local kind, name
+    if fishing then
+        -- The client says so itself, no cast needed. The loot comes from your
+        -- own bobber, so the object id means nothing here.
+        if not db.settings.fishing then
+            return
+        end
+        kind, name, gather, objectID = "fish", "Fishing Spot", nil, nil
+    else
+        kind = gather and gather.kind
+        name = gather and gather.name
+        if not kind and fromObject and db.settings.chests then
+            kind = "other"
+        end
     end
     if not kind then
         return
@@ -357,9 +375,13 @@ local function handleLoot()
         return
     end
 
-    local node, isNew = ns.RecordGather(mapID, x, y, kind, gather and gather.name, objectID, items)
+    local node, isNew = ns.RecordGather(mapID, x, y, kind, name, objectID, items)
     if isNew then
-        say(("new node: %s in %s. Type /nn to add a note."):format(node.name, ns.MapName(mapID)))
+        if kind == "fish" then
+            say(("new fishing spot in %s. Type /nn to add a note."):format(ns.MapName(mapID)))
+        else
+            say(("new node: %s in %s. Type /nn to add a note."):format(node.name, ns.MapName(mapID)))
+        end
     end
 end
 
@@ -426,7 +448,7 @@ local function onSlash(msg)
     if cmd == "" or cmd == "last" then
         local mapID, node = ns.FindLast()
         if not node then
-            say("no nodes recorded yet. Gather a herb or mine a vein first.")
+            say("no nodes recorded yet. Gather a herb, mine a vein, or catch a fish first.")
             return
         end
         ns.Note.Open(mapID, node)
@@ -451,6 +473,8 @@ local function onSlash(msg)
         setFlag("pins", rest:lower(), "world map pins")
     elseif cmd == "minimap" then
         setFlag("minimap", rest:lower(), "minimap pins")
+    elseif cmd == "fishing" then
+        setFlag("fishing", rest:lower(), "recording fishing spots")
     elseif cmd == "chests" then
         setFlag("chests", rest:lower(), "recording chests and other objects")
     elseif cmd == "debug" then
@@ -462,7 +486,8 @@ local function onSlash(msg)
         say("/nn  open the note for your last node")
         say("/nn note <text>  set that note from chat")
         say("/nn list  nodes in this zone")
-        say("/nn pins on|off, /nn minimap on|off, /nn chests on|off")
+        say("/nn pins on|off, /nn minimap on|off")
+        say("/nn fishing on|off, /nn chests on|off")
         say("/nn debug on|off, /nn status")
     end
 end
