@@ -3,7 +3,8 @@
 -- A node's map position is turned into a distance in yards from the player,
 -- then into an offset on the minimap. Pins beyond the minimap's view radius
 -- are hidden. Pins show a tooltip but let clicks pass through, so pinging the
--- minimap still works on top of them.
+-- minimap still works on top of them. A square minimap (from a UI addon that
+-- defines GetMinimapShape) keeps pins out to its corners.
 
 local _, ns = ...
 
@@ -36,10 +37,19 @@ local function onEnter(self)
     GameTooltip:AddLine(node.name or "Node")
     if node.loot and #node.loot > 0 then
         GameTooltip:AddLine("Last yield: " .. ns.LootText(node.loot), 1, 1, 1, true)
+    elseif node.lootText and node.lootText ~= "" then
+        GameTooltip:AddLine("Last yield: " .. node.lootText, 1, 1, 1, true)
     end
-    GameTooltip:AddLine("Last gathered " .. ns.Ago(node.last), 1, 1, 1)
+    if node.kind == "rare" and not node.last then
+        GameTooltip:AddLine("Seen " .. ns.Ago(node.seen), 1, 1, 1)
+    else
+        GameTooltip:AddLine("Last visited " .. ns.Ago(node.last), 1, 1, 1)
+    end
     if node.note and node.note ~= "" then
         GameTooltip:AddLine(node.note, 1, 0.82, 0, true)
+    end
+    if self.friend then
+        GameTooltip:AddLine("Shared by " .. (node.from or "a friend"), 0.4, 0.7, 1)
     end
     GameTooltip:Show()
 end
@@ -78,8 +88,9 @@ local function hideFrom(index)
 end
 
 -- Offset of a node from the minimap centre, in minimap pixels (x right, y up).
--- Returns nil when the node is outside the view radius.
-function Mini.Offset(dxYards, dyYards, facing, viewRadius, pixelRadius)
+-- Returns nil when the node is outside the view radius, or outside the square
+-- when the minimap is square.
+function Mini.Offset(dxYards, dyYards, facing, viewRadius, pixelRadius, square)
     -- Map y grows southward; screen y grows upward.
     local east, north = dxYards, -dyYards
     local x, y = east, north
@@ -89,7 +100,12 @@ function Mini.Offset(dxYards, dyYards, facing, viewRadius, pixelRadius)
         x = east * cos + north * sin
         y = -east * sin + north * cos
     end
-    if (x * x + y * y) > (viewRadius * EDGE) ^ 2 then
+    if square then
+        local limit = viewRadius * EDGE
+        if math.abs(x) > limit or math.abs(y) > limit then
+            return nil
+        end
+    elseif (x * x + y * y) > (viewRadius * EDGE) ^ 2 then
         return nil
     end
     return x / viewRadius * pixelRadius, y / viewRadius * pixelRadius
@@ -103,7 +119,8 @@ function Mini.Update()
     end
     local mapID, px, py = ns.PlayerPosition()
     local nodes = ns.NodesForMap(mapID)
-    if not mapID or #nodes == 0 then
+    local friends = (mapID and settings.friends and ns.FriendNodes()[mapID]) or {}
+    if not mapID or (#nodes == 0 and #friends == 0) then
         hideFrom(1)
         return
     end
@@ -124,20 +141,31 @@ function Mini.Update()
         end
     end
 
+    local shape = rawget(_G, "GetMinimapShape")
+    local square = type(shape) == "function" and shape() == "SQUARE"
     local pixelRadius = Minimap:GetWidth() / 2
     local used = 0
-    for i = 1, #nodes do
-        local node = nodes[i]
-        local x, y = Mini.Offset((node.x - px) * width, (node.y - py) * height, facing, viewRadius, pixelRadius)
+    local function place(node, friend)
+        local x, y = Mini.Offset((node.x - px) * width, (node.y - py) * height, facing, viewRadius, pixelRadius, square)
         if x then
             used = used + 1
             local pin = acquire(used)
-            pin.node = node
-            pin.icon:SetTexture(node.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+            pin.node, pin.friend = node, friend
+            pin.icon:SetTexture(ns.IconFor(node))
+            pin.icon:SetDesaturated(friend)
             pin:ClearAllPoints()
             pin:SetPoint("CENTER", Minimap, "CENTER", x, y)
             pin:Show()
         end
+    end
+    for i = 1, #friends do
+        local node = friends[i]
+        if not ns.FindMatch(nodes, node.kind, node.x, node.y, node.npc) then
+            place(node, true)
+        end
+    end
+    for i = 1, #nodes do
+        place(nodes[i], false)
     end
     hideFrom(used + 1)
 end
