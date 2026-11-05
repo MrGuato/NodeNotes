@@ -62,19 +62,44 @@ local facing, rotate, viewRadius = 0, "0", 100
 function GetPlayerFacing() return facing end
 function GetCVar(k) if k == "rotateMinimap" then return rotate end end
 C_Minimap = { GetViewRadius = function() return viewRadius end }
+-- Stranglethorn Vale (224) sits inside Eastern Kingdoms (1415), inside Azeroth (947).
+local parents = { [224] = 1415, [1415] = 947 }
+local mapNames = { [224] = "Stranglethorn Vale", [1415] = "Eastern Kingdoms" }
 C_Map = {
   GetMapWorldSize = function() return 4000, 3000 end,
   GetBestMapForUnit = function() return pos.map end,
   GetPlayerMapPosition = function() if not pos.x then return nil end return { GetXY = function() return pos.x, pos.y end } end,
-  GetMapInfo = function(id) return { name = id == 224 and "Stranglethorn Vale" or ("Zone" .. id) } end,
+  GetMapInfo = function(id) return { name = mapNames[id] or ("Zone" .. id), parentMapID = parents[id] } end,
+  GetMapRectOnMap = function(child, outer) if child == 224 and outer == 1415 then return 0.4, 0.6, 0.6, 0.9 end end,
 }
-local spells = { [2366] = "Herb Gathering", [2575] = "Mining", [133] = "Fireball", [3365] = "Opening" }
+local spells = { [2366] = "Herb Gathering", [2575] = "Mining", [133] = "Fireball", [3365] = "Opening", [99366] = "Herb Gathering" }
 C_Spell = { GetSpellName = function(id) return spells[id] end }
+
+-- units
+local units = {}
+function UnitExists(u) return units[u] ~= nil end
+function UnitIsPlayer(u) return units[u] ~= nil and units[u].player == true end
+function UnitClassification(u) return units[u] and units[u].class or "normal" end
+function UnitGUID(u) return units[u] and units[u].guid end
+function UnitName(u) if u == "player" then return "Me" end return units[u] and units[u].name end
+
+-- addon messages
+local sent = {}
+local group, raid, guild, combat = false, false, false, false
+C_ChatInfo = {
+  RegisterAddonMessagePrefix = function() return true end,
+  SendAddonMessage = function(p, m, ch) sent[#sent + 1] = { p = p, m = m, ch = ch } end,
+}
+function IsInGroup() return group end
+function IsInRaid() return raid end
+function IsInGuild() return guild end
+function InCombatLockdown() return combat end
+function Ambiguate(name) return (name:gsub("%-.*$", "")) end
 
 -- loot window
 local loot = {}
 function GetNumLootItems() return #loot end
-function GetLootSlotInfo(i) local l = loot[i]; return l.icon, l.name, l.qty end
+function GetLootSlotInfo(i) local l = loot[i]; return l.icon, l.name, l.qty, nil, l.q, false, l.quest end
 function GetLootSlotType(i) return loot[i].coin and 2 or 1 end
 function GetLootSlotLink(i) return loot[i].id and ("|cffffffff|Hitem:" .. loot[i].id .. "::::|h[x]|h|r") or nil end
 function GetLootSourceInfo(i) return loot[i].guid end
@@ -93,7 +118,7 @@ WorldMapFrame.OnMapChanged = function() end
 WorldMapFrame.OnCanvasScaleChanged = function() end
 
 local ns = {}
-local FILES = { "Core.lua", "Note.lua", "Map.lua", "Minimap.lua" }
+local FILES = { "Core.lua", "Note.lua", "Map.lua", "Minimap.lua", "Share.lua" }
 for _, file in ipairs(FILES) do
   assert(loadfile(dir .. "/" .. file))("NodeNotes", ns)
 end
@@ -101,8 +126,10 @@ local function tick() for i = 1, #frames do local f = frames[i]; if f._scripts.O
 fire("ADDON_LOADED", "Other"); assert(NodeNotesDB == nil)
 fire("ADDON_LOADED", "NodeNotes"); fire("PLAYER_LOGIN")
 local db = NodeNotesDB
-assert(db.sessions == 1 and db.settings.pins == true and db.settings.chests == false)
+assert(db.sessions == 1 and db.version == 2 and db.settings.pins == true and db.settings.chests == true)
 assert(db.settings.minimap == true and db.settings.fishing == true and db.settings.debug == false)
+assert(db.settings.rares == true and db.settings.finds == true and db.settings.findQuality == 3 and db.settings.continent == true)
+assert(db.settings.share == "off" and db.settings.friends == true and type(db.friends) == "table")
 local slash = assert(SlashCmdList.NODENOTES); assert(SLASH_NODENOTES2 == "/nn")
 slash("debug on")
 slash(""); slash("list"); slash("note hi")   -- nothing recorded yet, must not error
@@ -145,6 +172,7 @@ assert(ns.LootText(vein.loot) == "3x Tin Ore, 1x Coarse Stone, 1x Shadowgem")
 
 -- 6. things that must not record
 local before = #list
+slash("chests off")
 advance(60)
 openLoot({ { name = "Linen Cloth", qty = 2, guid = "Creature-0-3299-0-36-1234-00005E1234" } })          -- mob loot
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 133); openLoot({ { name = "Wool Cloth", qty = 1 } })    -- non-gather cast
@@ -159,10 +187,10 @@ pos.x = nil; fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); openLoot({ {
 fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 2366); openLoot({ { name = SECRET, qty = 1 } })          -- secret loot name
 assert(#list == before, "recorded something it should not have: " .. #list .. " vs " .. before)
 
--- 7. chests on: object loot without a gather cast is recorded as other
+-- 7. chests on: object loot without a gather cast is recorded as a chest
 slash("chests on"); pos.x, pos.y = 0.10, 0.10
 openLoot({ { name = "Silk Cloth", qty = 1, guid = "GameObject-0-3299-0-36-99-00005E1234" } })
-assert(#list == before + 1 and list[#list].kind == "other" and list[#list].name == "Silk Cloth")
+assert(#list == before + 1 and list[#list].kind == "chest" and list[#list].name == "Silk Cloth" and list[#list].obj == 99)
 slash("chests off")
 
 -- 7b. fishing: the client flags the loot, no cast needed. Casts from one stretch of
@@ -264,11 +292,153 @@ pos.map = 999; tick(); assert(ns.Mini.PinCount() == 0); pos.map = 224
 pos.x = nil; tick(); assert(ns.Mini.PinCount() == 0); pos.x, pos.y = 0.40, 0.60
 Minimap._shown = false; tick(); assert(ns.Mini.PinCount() == 0); Minimap._shown = true
 
--- 13. a reload keeps the data and bumps the session counter
+-- 12b. chests: Opening names the chest; objects holding only quest items are left alone
+slash("chests on"); pos.x, pos.y = 0.20, 0.30
+local count0 = #list
+fire("UNIT_SPELLCAST_SENT", "player", "Battered Chest", "c", 3365); fire("UNIT_SPELLCAST_SUCCEEDED", "player", "c", 3365)
+openLoot({ { name = "Coarse Thread", qty = 2, guid = "GameObject-0-3299-0-36-2843-00005E1234" } })
+local chest = list[#list]
+assert(#list == count0 + 1 and chest.kind == "chest" and chest.name == "Battered Chest" and chest.obj == 2843)
+assert(out[#out]:find("new chest: Battered Chest", 1, true), out[#out])
+assert(ns.Describe(chest, 224)[2]:find("^Looted 1 time"), ns.Describe(chest, 224)[2])
+pos.x = 0.25
+openLoot({ { name = "Tear of Tilloa", qty = 1, quest = true, guid = "GameObject-0-3299-0-36-2289-00005E1234" } })
+assert(#list == count0 + 1, "quest object recorded")
+-- a gather spell this file has no id for is still known by its name
+pos.x, pos.y = 0.30, 0.30
+gather(99366, "Fadeleaf", { { name = "Fadeleaf", qty = 1, guid = HERB_GUID } })
+assert(#list == count0 + 2 and list[#list].kind == "herb" and list[#list].name == "Fadeleaf")
+
+-- 12c. special finds: a blue from a mob gets a pin with just the special drop
+local MOB = "Creature-0-3299-0-36-1234-00005E1234"
+pos.x, pos.y = 0.50, 0.50
+openLoot({ { name = "Linen Cloth", qty = 2, q = 1, guid = MOB }, { name = "Cruel Barb", qty = 1, q = 3, id = 5191, icon = 135324, guid = MOB } })
+local find = list[#list]
+assert(find.kind == "find" and find.name == "Cruel Barb" and #find.loot == 1 and find.best == 3 and find.icon == 135324)
+assert(out[#out]:find("special find: Cruel Barb", 1, true), out[#out])
+advance(100)
+openLoot({ { name = "Gnoll Paw", qty = 1, q = 2, guid = MOB } })
+assert(list[#list] == find and find.count == 1, "a green is not special by default")
+slash("finds green"); openLoot({ { name = "Gnoll Paw", qty = 1, q = 2, guid = MOB } })
+assert(find.count == 2 and find.loot[1].name == "Gnoll Paw" and find.best == 3)
+slash("finds off"); advance(100); openLoot({ { name = "Big Find", qty = 1, q = 4, guid = MOB } }); assert(find.count == 2)
+slash("finds blue"); assert(db.settings.finds and db.settings.findQuality == 3)
+local count1 = #list
+
+-- 12d. rares: seen when you target, hover or see the nameplate; a kill when you loot it
+local RARE = "Creature-0-3299-0-36-5555-0000AAAA"
+pos.x, pos.y = 0.60, 0.40
+units.target = { guid = RARE, name = "Gorlash", class = "rareelite" }
+fire("PLAYER_TARGET_CHANGED")
+local rare = list[#list]
+assert(#list == count1 + 1 and rare.kind == "rare" and rare.npc == 5555 and rare.count == 0 and rare.seenCount == 1)
+assert(rare.name == "Gorlash" and out[#out]:find("rare spotted: Gorlash", 1, true), out[#out])
+units.mouseover = units.target; fire("UPDATE_MOUSEOVER_UNIT"); assert(rare.seenCount == 1, "same sighting counts once")
+units.mouseover = { guid = MOB, name = "Kobold", class = "normal" }; fire("UPDATE_MOUSEOVER_UNIT")
+units.mouseover = { guid = "Player-1-0000AAAA", name = "Someone", class = "rare", player = true }; fire("UPDATE_MOUSEOVER_UNIT")
+assert(#list == count1 + 1)
+pos.x = 0.62
+openLoot({ { name = "Linen Cloth", qty = 1, q = 1, guid = RARE }, { name = "Gorlash's Fang", qty = 1, q = 3, guid = RARE } })
+assert(#list == count1 + 1 and rare.count == 1 and #rare.loot == 2 and rare.best == 3 and near(rare.x, 0.62))
+local rl = ns.Describe(rare, 224)
+assert(rl[2] == "Killed 1 time, last just now" and rl[3] == "Seen 1 time, last just now", rl[2] .. " / " .. tostring(rl[3]))
+assert(ns.IconFor(rare):find("RaidTargetingIcon_8", 1, true))
+advance(400); pos.x = 0.65; fire("PLAYER_TARGET_CHANGED")
+assert(rare.seenCount == 2 and near(rare.x, 0.65), "seen again later, the pin follows")
+units.nameplate3 = { guid = "Creature-0-3299-0-36-7777-0000CCCC", name = "Mosh'Ogg Brute", class = "rare" }
+fire("NAME_PLATE_UNIT_ADDED", "nameplate3"); assert(#list == count1 + 2 and list[#list].npc == 7777)
+slash("rares off")
+units.target = { guid = "Creature-0-3299-0-36-6666-0000BBBB", name = "Other Rare", class = "rare" }; fire("PLAYER_TARGET_CHANGED")
+assert(#list == count1 + 2); slash("rares on")
+units.target, units.mouseover, units.nameplate3 = nil, nil, nil
+units.target = { guid = SECRET, class = "rare" }; fire("PLAYER_TARGET_CHANGED"); units.target = nil  -- secret guid: ignored
+assert(#list == count1 + 2)
+
+-- 12e. continent pins: zone nodes show on the continent map, smaller, in the zone's rectangle
+viewed = 1415; WorldMapFrame.OnMapChanged(WorldMapFrame)
+assert(ns.Map.PinCount() == #list, "continent pins " .. ns.Map.PinCount())
+local function mapPin(node) for i = 1, #frames do local f = frames[i]; if f._type == "Button" and f.node == node and f._shown then return f end end end
+pin = assert(mapPin(n)); p = pin._points[1]
+assert(near(pin._scale, 0.7 / 0.5) and near(p[4], (0.4 + 0.40 * 0.2) * 1000 / 1.4) and near(p[5], -(0.6 + 0.60 * 0.3) * 660 / 1.4))
+slash("continent off"); assert(ns.Map.PinCount() == 0); slash("continent on"); assert(ns.Map.PinCount() == #list)
+viewed = 947; WorldMapFrame.OnMapChanged(WorldMapFrame); assert(ns.Map.PinCount() == 0, "no rectangle, no pins")
+viewed = 224; WorldMapFrame.OnMapChanged(WorldMapFrame); assert(ns.Map.PinCount() == #list)
+
+-- 12f. square minimap: pins reach into the corners
+assert(ns.Mini.Offset(80, -80, nil, 100, 70) == nil and ns.Mini.Offset(80, -80, nil, 100, 70, true) ~= nil)
+assert(ns.Mini.Offset(95, 0, nil, 100, 70, true) == nil)
+pos.x, pos.y = 0.40 - 80 / 4000, 0.60 + 80 / 3000
+tick(); assert(miniPin(n) == nil, "round minimap: corner is outside")
+GetMinimapShape = function() return "SQUARE" end
+tick(); assert(miniPin(n) ~= nil, "square minimap: corner is inside")
+GetMinimapShape = nil
+pos.x, pos.y = 0.40, 0.60
+
+-- 12g. sharing: messages are plain, bounded and checked
+local sample = { x = 0.4012, y = 0.6, kind = "herb", count = 3, last = wall - 120, icon = 134187, best = 3, name = "Strangle|kelp",
+  loot = { { name = "Stranglekelp", qty = 2 } }, note = "behind |Hitem:1|h the\nwreck" }
+local msg = ns.Share.Encode(224, sample, wall)
+assert(not msg:find("|", 1, true) and not msg:find("\n", 1, true) and #msg <= 250, msg)
+local r = assert(ns.Share.Decode(msg))
+assert(r.mapID == 224 and near(r.x, 0.4012) and r.kind == "herb" and r.count == 3 and r.ago == 120 and r.icon == 134187 and r.best == 3)
+assert(r.name == "Strangle/kelp" and r.lootText == "2x Stranglekelp" and r.note == "behind /Hitem:1/h the wreck", r.note)
+sample.note = string.rep("\195\164", 200)   -- 200 two-byte letters
+msg = ns.Share.Encode(224, sample, wall); assert(#msg <= 250)
+r = assert(ns.Share.Decode(msg)); assert(#r.note > 0 and #r.note % 2 == 0 and r.note:find("^[\195\164]+$"), "cut mid letter")
+for _, bad in ipairs({ "", "2\t224", msg .. "\textra", (msg:gsub("^1\t224", "1\t-5")), (msg:gsub("\therb\t", "\tboss\t")),
+    (msg:gsub("^(1\t224\t)%d+", "%1nan")), string.rep("x", 300) }) do
+  assert(ns.Share.Decode(bad) == nil, "accepted: " .. bad:sub(1, 40))
+end
+-- sending: off by default, then one message a second to the right channel, never in combat
+local function flush() for _ = 1, 6 do tick() end end
+assert(ns.Share.Queue(224, n) == false and #sent == 0)
+slash("share group"); group = true
+assert(ns.Share.Queue(224, n) == true and ns.Share.Queue(224, n) == false and ns.Share.Pending() == 1)
+combat = true; flush(); assert(#sent == 0); combat = false
+flush(); assert(#sent == 1 and sent[1].ch == "PARTY" and sent[1].p == "NodeNotes" and ns.Share.Pending() == 0)
+ns.SetNote(n, "shared note"); flush(); assert(#sent == 2 and sent[2].m:find("shared note", 1, true))
+group = false; ns.SetNote(n, "solo"); flush(); assert(#sent == 2 and ns.Share.Pending() == 0, "nobody to send to")
+slash("share both"); group, guild = true, true; ns.SetNote(n, "both"); flush()
+assert(#sent == 4 and sent[3].ch == "PARTY" and sent[4].ch == "GUILD")
+slash("share sync"); assert(ns.Share.Pending() > 1); flush(); flush(); flush()
+slash("share off"); assert(ns.Share.Pending() == 0); local quiet = #sent; ns.SetNote(n, "quiet"); flush(); assert(#sent == quiet)
+group, guild = false, false
+-- receiving: only from your group or guild, never from yourself, kept apart from your own nodes
+local function hear(m, ch, who) fire("CHAT_MSG_ADDON", "NodeNotes", m, ch, who) end
+local vein2 = { x = 0.90, y = 0.10, kind = "ore", count = 2, last = wall - 60, icon = 135232, name = "Copper Vein",
+  loot = { { name = "Copper Ore", qty = 3 } }, note = "top of the hill" }
+local fm = ns.Share.Encode(224, vein2, wall)
+hear(fm, "WHISPER", "Mira-Realm"); hear(fm, "PARTY", "Me"); hear("garbage", "PARTY", "Mira-Realm")
+assert(db.friends[224] == nil, "stored something it should not have")
+hear(fm, "PARTY", "Mira-Realm")
+local fn = db.friends[224][1]
+assert(fn.from == "Mira" and fn.kind == "ore" and fn.last == wall - 60 and fn.note == "top of the hill" and fn.lootText == "3x Copper Ore")
+hear(fm, "GUILD", "Mira-Realm"); assert(#db.friends[224] == 1, "same node again updates it")
+assert(ns.Map.PinCount() == #list + 1)
+local fpin = assert(mapPin(fn)); assert(fpin.friend == true)
+fpin._scripts.OnEnter(fpin); fpin._scripts.OnClick(fpin); assert(ns.Note.Current() == nil, "friend pins have no note window")
+-- a friend's node where you already have one is not drawn twice
+hear(ns.Share.Encode(224, { x = 0.40, y = 0.60, kind = "herb", count = 1, last = wall, name = "Stranglekelp" }, wall), "GUILD", "Kev")
+assert(#db.friends[224] == 2 and ns.Map.PinCount() == #list + 1)
+-- on the minimap too
+pos.x, pos.y = 0.90 - 20 / 4000, 0.10; tick(); assert(miniPin(fn) ~= nil); pos.x, pos.y = 0.40, 0.60
+slash("friends off"); assert(ns.Map.PinCount() == #list)
+hear(ns.Share.Encode(224, { x = 0.95, y = 0.95, kind = "chest", count = 1, last = wall, name = "Box" }, wall), "PARTY", "Mira")
+assert(#db.friends[224] == 2); slash("friends on"); assert(ns.Map.PinCount() == #list + 1)
+slash("friends clear"); assert(next(db.friends) == nil and ns.Map.PinCount() == #list)
+
+-- 13. a reload keeps the data, bumps the session counter, and renames 0.3.0 chests
+local legacy = { x = 0.1, y = 0.1, kind = "other", count = 1, totals = {}, note = "" }
+db.nodes[500] = { legacy }; db.version = 1; db.settings.chests = false
 frames = { UIParent, GameTooltip, WorldMapFrame, canvas, Minimap }; local ns2 = {}
 for _, file in ipairs(FILES) do assert(loadfile(dir .. "/" .. file))("NodeNotes", ns2) end
 fire("ADDON_LOADED", "NodeNotes")
 assert(NodeNotesDB == db and db.sessions == 2 and #db.nodes[224] == #list)
+assert(legacy.kind == "chest" and db.version == 2 and db.settings.chests == true, "upgrade turns chests on")
+-- a later reload keeps the player's own choice
+db.settings.chests = false; frames = { UIParent, GameTooltip, WorldMapFrame, canvas, Minimap }; local ns3 = {}
+for _, file in ipairs(FILES) do assert(loadfile(dir .. "/" .. file))("NodeNotes", ns3) end
+fire("ADDON_LOADED", "NodeNotes"); assert(db.settings.chests == false and db.sessions == 3)
 local m, ln = ns2.FindLast(); assert(m == 224 and ln ~= nil)
 
 for _, l in ipairs(out) do realprint(l) end

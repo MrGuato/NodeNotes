@@ -9,7 +9,9 @@ read_globals = {
     "hooksecurefunc", "InCombatLockdown", "GetTime", "issecretvalue",
     "GetNumLootItems", "GetLootSlotInfo", "GetLootSlotLink", "GetLootSlotType", "GetLootSourceInfo",
     "IsFishingLoot", "GetCVar", "GetPlayerFacing",
-    "C_Map", "C_Spell", "C_Minimap", "C_Timer",
+    "UnitExists", "UnitIsPlayer", "UnitClassification", "UnitGUID", "UnitName",
+    "IsInRaid", "IsInGroup", "IsInGuild",
+    "C_Map", "C_Spell", "C_Minimap", "C_Timer", "C_ChatInfo",
     "date", "time",
 }
 -- Values the addon defines for the client to read.

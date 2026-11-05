@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0
+
+- Rares. Targeting, hovering or seeing the nameplate of a rare records where
+  you met it, with a skull pin. Looting it adds the kill and its drop.
+  `/nn rares on|off`, on by default.
+- Special finds. A blue or better from any mob gets its own pin.
+  `/nn finds on|off|green|blue|epic`.
+- Chests are on by default. Upgrading from 0.3.0 or earlier turns them on
+  once; `/nn chests off` turns them off again. Chests are named after the
+  chest you opened, or after the first
+  item when no name is available. Objects that only hold quest items are
+  skipped. Chests from earlier versions are kept.
+- A coloured ring on the world map marks a node that ever gave you a blue or
+  better.
+- Continent maps show the nodes of every zone inside them.
+  `/nn continent on|off`.
+- Square minimaps from UI addons are supported.
+- Herb and mining casts are recognised by spell id and the game's own spell
+  name, so non-English clients work.
+- Optional sharing with your group or guild, off by default:
+  `/nn share group|guild|both|off` and `/nn share sync`. Friends' nodes show
+  with a blue corner on the world map and are kept apart from yours.
+  `/nn friends on|off|clear`, on by default.
+- `/nn status` counts nodes by kind.
+- Animated tour in the README.
+
 ## 0.3.0
 
 - Fishing. Catches are recorded as fishing spots with the same pins, history

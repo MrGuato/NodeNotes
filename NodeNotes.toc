@@ -1,11 +1,12 @@
 ## Interface: 16001
 ## Title: NodeNotes
-## Notes: Remembers where you gathered herbs, ore and fish, what each spot gave you and when, and shows it on the world map and minimap with a note you can write.
+## Notes: Remembers the herbs, ore, fishing spots, chests, rares and special drops you found, what each gave you and when, and shows them on the world map and minimap with a note you can write. Optional sharing with your group or guild.
 ## Author: MrGuato
-## Version: 0.3.0
+## Version: 0.4.0
 ## SavedVariables: NodeNotesDB
 
 Core.lua
 Note.lua
 Map.lua
 Minimap.lua
+Share.lua
